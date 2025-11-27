@@ -1,25 +1,15 @@
 import streamlit as st
 import numpy as np
 from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.densenet import preprocess_input
 from PIL import Image
-import os
-import gdown
 
 # -----------------------------
-# Model Download & Load
+# Load Model From Local File
 # -----------------------------
-MODEL_PATH = "model.h5"
-MODEL_URL = "https://drive.google.com/uc?id=<FILE_ID>"  # Replace with your actual Google Drive file ID
-
-# Download model if it doesn't exist
-if not os.path.exists(MODEL_PATH):
-    st.info("Downloading model, please wait...")
-    gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
-
-# Load model
 @st.cache_resource
 def load_pneumonia_model():
-    model = load_model(MODEL_PATH)
+    model = load_model("model.h5")
     return model
 
 model = load_pneumonia_model()
@@ -28,14 +18,18 @@ model = load_pneumonia_model()
 # Preprocessing Function
 # -----------------------------
 def preprocess_image(image):
-    image = image.resize((224, 224))  # Resize image
-    image = image.convert("L")        # Convert to grayscale
-    image = np.array(image)
-    image = image / 255.0             # Normalize
-    image = np.expand_dims(image, axis=-1)
-    image = np.repeat(image, 3, axis=-1)  # Convert to 3 channels
-    image = np.expand_dims(image, axis=0) # Add batch dimension
-    return image
+    """
+    Preprocess uploaded image to match DenseNet121 training.
+    - Resize to 224x224
+    - Convert to RGB
+    - Expand dims and apply DenseNet preprocess_input
+    """
+    image = image.resize((224, 224))
+    image = image.convert("RGB")          # 3 channels
+    img_array = np.array(image)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = preprocess_input(img_array)
+    return img_array
 
 # -----------------------------
 # Initialize Session State
@@ -47,7 +41,7 @@ if "result" not in st.session_state:
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("🩺 Pneumonia Detection using CNN")
+st.title("🩺 Pneumonia Detection using CNN (DenseNet121)")
 st.write("Upload a Chest X-ray image to check whether pneumonia is present or not.")
 
 uploaded_file = st.file_uploader("Upload X-ray Image", type=["jpg", "jpeg", "png"])
@@ -55,20 +49,23 @@ uploaded_file = st.file_uploader("Upload X-ray Image", type=["jpg", "jpeg", "png
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
     
-    # Resize for display to avoid huge image
+    # Resize for display
     display_image = image.copy()
     display_image.thumbnail((400, 400))
     st.image(display_image, caption="Uploaded X-ray", use_column_width=False)
 
     # Preprocess and predict
     img = preprocess_image(image)
-    pred = model.predict(img)[0][0]
+    pred = model.predict(img)[0]  # shape (2,) because softmax over 2 classes
+    pred_class = np.argmax(pred)
+    st.session_state.pred_score = pred[pred_class]
 
-    # Store in session state
-    st.session_state.pred_score = pred
-    st.session_state.result = "PNEUMONIA DETECTED" if pred > 0.5 else "NORMAL"
+    if pred_class == 1:  # assuming index 1 = PNEUMONIA
+        st.session_state.result = "PNEUMONIA DETECTED"
+    else:
+        st.session_state.result = "NORMAL"
 
-# Display prediction if available
+# Display prediction
 if st.session_state.result:
     st.subheader("🔍 Prediction Result:")
     st.write(f"*Model Output Score:* {st.session_state.pred_score:.4f}")
